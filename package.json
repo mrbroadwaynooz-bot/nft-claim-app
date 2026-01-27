@@ -1,0 +1,19 @@
+{
+  "name": "claim-app",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ethers": "^6.13.0",
+    "qrcode": "^1.5.4",
+    "helmet": "^7.1.0",
+    "better-sqlite3": "^11.0.0"
+  }
+}
