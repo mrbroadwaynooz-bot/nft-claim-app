@@ -3,7 +3,12 @@ import helmet from "helmet";
 import Database from "better-sqlite3";
 import QRCode from "qrcode";
 
-import { createThirdwebClient, Engine, getContract, prepareContractCall } from "thirdweb";
+import {
+  createThirdwebClient,
+  Engine,
+  getContract,
+  prepareContractCall
+} from "thirdweb";
 import { base } from "thirdweb/chains";
 
 const app = express();
@@ -17,8 +22,6 @@ const THIRDWEB_SECRET_KEY = process.env.THIRDWEB_SECRET_KEY || "";
 const THIRDWEB_VAULT_ACCESS_TOKEN = process.env.THIRDWEB_VAULT_ACCESS_TOKEN || "";
 const SERVER_WALLET_ADDRESS = process.env.SERVER_WALLET_ADDRESS || "";
 const NFT_CONTRACT_ADDRESS = process.env.NFT_CONTRACT_ADDRESS || "";
-
-const CHAIN = (process.env.CHAIN || "base").toLowerCase();
 const WIX_CLAIM_URL = process.env.WIX_CLAIM_URL || ""; // should end with ?code=
 
 function envOk() {
@@ -39,7 +42,7 @@ db.exec(`
     created_at INTEGER NOT NULL,
     used_at INTEGER,
     used_by TEXT,
-    tx_id TEXT
+    transaction_id TEXT
   );
 `);
 
@@ -47,19 +50,11 @@ const insertQR = db.prepare("INSERT OR IGNORE INTO qrs (id, created_at) VALUES (
 const getQR = db.prepare("SELECT * FROM qrs WHERE id = ?");
 const listQR = db.prepare("SELECT * FROM qrs ORDER BY created_at DESC LIMIT ?");
 const markUsed = db.prepare(
-  "UPDATE qrs SET used_at=?, used_by=?, tx_id=? WHERE id=? AND used_at IS NULL"
+  "UPDATE qrs SET used_at=?, used_by=?, transaction_id=? WHERE id=? AND used_at IS NULL"
 );
 
-// ---------- HELPERS ----------
 function newId() {
-  // simple random id (URL-safe)
   return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-}
-
-function chainObj() {
-  // For now, we support base only (as you requested)
-  if (CHAIN !== "base") throw new Error("Only CHAIN=base supported in this starter.");
-  return base;
 }
 
 // ---------- THIRDWEB ENGINE ----------
@@ -68,30 +63,26 @@ const client = createThirdwebClient({ secretKey: THIRDWEB_SECRET_KEY });
 const serverWallet = Engine.serverWallet({
   client,
   address: SERVER_WALLET_ADDRESS,
-  vaultAccessToken: THIRDWEB_VAULT_ACCESS_TOKEN,
+  vaultAccessToken: THIRDWEB_VAULT_ACCESS_TOKEN
 });
 
 const contract = getContract({
   client,
-  chain: chainObj(),
-  address: NFT_CONTRACT_ADDRESS,
+  chain: base,
+  address: NFT_CONTRACT_ADDRESS
 });
 
-// NOTE: You must use ONE mint function that matches your contract.
-// This starter uses "claimTo(address,uint256)" which matches many thirdweb NFT drop contracts.
-// If your contract uses a different mint function, tell me the method name and I’ll change it.
+// NFT Drop mint: claimTo(address,uint256)
 function buildMintTx(toAddress) {
   return prepareContractCall({
     contract,
     method: "function claimTo(address _receiver, uint256 _quantity)",
-    params: [toAddress, 1n],
+    params: [toAddress, 1n]
   });
 }
 
 // ---------- ROUTES ----------
-app.get("/", (req, res) => {
-  res.send("Engine Claim backend running ✅");
-});
+app.get("/", (req, res) => res.send("Engine Claim backend running ✅"));
 
 app.get("/env-check", (req, res) => {
   res.json({
@@ -100,8 +91,7 @@ app.get("/env-check", (req, res) => {
     hasSecretKey: !!THIRDWEB_SECRET_KEY,
     hasVaultToken: !!THIRDWEB_VAULT_ACCESS_TOKEN,
     hasServerWallet: !!SERVER_WALLET_ADDRESS,
-    hasContract: !!NFT_CONTRACT_ADDRESS,
-    chain: CHAIN,
+    hasContract: !!NFT_CONTRACT_ADDRESS
   });
 });
 
@@ -128,18 +118,17 @@ app.get("/api/qrs", (req, res) => {
     created_at: r.created_at,
     used_at: r.used_at,
     used_by: r.used_by,
-    tx_id: r.tx_id,
+    transaction_id: r.transaction_id
   }));
   res.json({ ok: true, items });
 });
 
-// QR image for printing
+// QR PNG for printing (points to Wix Claim page)
 app.get("/qr/:id.png", async (req, res) => {
   const id = String(req.params.id || "");
   const row = getQR.get(id);
   if (!row) return res.status(404).send("Not found");
 
-  // QR should point to your Wix claim page
   const urlBase = WIX_CLAIM_URL || `${req.protocol}://${req.get("host")}/claim?code=`;
   const url = `${urlBase}${encodeURIComponent(id)}`;
 
@@ -150,7 +139,7 @@ app.get("/qr/:id.png", async (req, res) => {
 });
 
 // CLAIM endpoint
-// POST /api/claim  body: { code: "abc123", walletAddress: "0x..." }
+// POST /api/claim { code, walletAddress }
 app.post("/api/claim", async (req, res) => {
   const code = String(req.body?.code || "");
   const walletAddress = String(req.body?.walletAddress || "");
@@ -167,11 +156,8 @@ app.post("/api/claim", async (req, res) => {
 
   try {
     const transaction = buildMintTx(walletAddress);
-
-    // Engine queues it (server wallet pays gas)
     const { transactionId } = await serverWallet.enqueueTransaction({ transaction });
 
-    // Mark used immediately so the QR can't be reused
     const changed = markUsed.run(Date.now(), walletAddress, transactionId, code).changes;
     if (!changed) return res.status(409).json({ ok: false, error: "QR just got used" });
 
@@ -181,9 +167,8 @@ app.post("/api/claim", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Running on port ${PORT}`));
+
 
 
 app.listen(PORT, () => {
