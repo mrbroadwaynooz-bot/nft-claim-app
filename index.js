@@ -178,9 +178,3 @@ server.on("error", (err) => {
     process.exit(1);
   }
 });
-
-
-
-app.listen(PORT, () => {
-  console.log(`Running on port ${PORT}`);
-});
