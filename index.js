@@ -167,7 +167,17 @@ app.post("/api/claim", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Running on port ${PORT}`));
+const server = app.listen(PORT, () => console.log(`Running on port ${PORT}`));
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.log("Port already in use, waiting and retrying...");
+    setTimeout(() => process.exit(1), 1000); // Render will restart cleanly
+  } else {
+    console.error(err);
+    process.exit(1);
+  }
+});
 
 
 
