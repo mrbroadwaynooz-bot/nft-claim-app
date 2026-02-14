@@ -107,7 +107,10 @@ app.post("/api/qrs/create", (req, res) => {
     ids.push(id);
   }
 
-  res.json({ ok: true, created: ids.length, ids });
+const claimUrl = `${process.env.WIX_CLAIM_URL}?id=${ids[0]}`;
+
+res.json({
+  claimUrl: claimUrl
 });
 
 // ADMIN: list QRs
