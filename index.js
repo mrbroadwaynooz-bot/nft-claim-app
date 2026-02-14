@@ -97,7 +97,7 @@ app.get("/env-check", (req, res) => {
 
 // ADMIN: create QRs
 app.post("/api/qrs/create", (req, res) => {
-  const count = Math.max(1, Math.min(200, Number(req.body?.count || 12)));
+  const count = Math.max(1, Math.min(200, Number(req.body?.count || 1)));
   const now = Date.now();
   const ids = [];
 
@@ -107,12 +107,19 @@ app.post("/api/qrs/create", (req, res) => {
     ids.push(id);
   }
 
-const claimUrl = `${process.env.WIX_CLAIM_URL}?id=${ids[0]}`;
+  // Build a claim URL for the FIRST code
+  const claimUrl = (process.env.WIX_CLAIM_URL || "") + "?id=" + ids[0];
 
-res.json({
-  claimUrl: claimUrl
-});
-
+  // Return BOTH (Wix uses claimUrl)
+  res.json({
+    ok: true,
+    claimUrl,
+    code: ids[0],
+    created: ids.length,
+    ids
+   });
+  });
+  
 // ADMIN: list QRs
 app.get("/api/qrs", (req, res) => {
   const limit = Math.max(1, Math.min(500, Number(req.query?.limit || 50)));
@@ -132,8 +139,8 @@ app.get("/qr/:id.png", async (req, res) => {
   const row = getQR.get(id);
   if (!row) return res.status(404).send("Not found");
 
-  const urlBase = WIX_CLAIM_URL || `${req.protocol}://${req.get("host")}/claim?code=`;
-  const url = `${urlBase}${encodeURIComponent(id)}`;
+  const urlBase = WIX_CLAIM_URL || `${req.protocol}://${req.get("host")}/claim`;
+const url = `${urlBase}?id=${encodeURIComponent(id)}`;
 
   const png = await QRCode.toBuffer(url, { width: 700, margin: 1 });
   res.setHeader("Content-Type", "image/png");
