@@ -178,3 +178,8 @@ server.on("error", (err) => {
     process.exit(1);
   }
 });
+app.get("/test", (req, res) => {
+  res.json({
+    claimUrl: "https://google.com"
+  });
+});
