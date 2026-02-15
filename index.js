@@ -177,6 +177,12 @@ app.post("/api/claim", async (req, res) => {
   }
 });
 
+app.get("/test-claimurl", (req, res) => {
+  const id = "test123";
+  const claimUrl = (process.env.WIX_CLAIM_URL || "") + id; // expects ...?code=
+  res.json({ claimUrl });
+});
+
 const server = app.listen(PORT, () => console.log(`Running on port ${PORT}`));
 
 server.on("error", (err) => {
