@@ -96,7 +96,7 @@ app.get("/env-check", (req, res) => {
 });
 
 // ADMIN: create QRs
-app.post("/api/qrs/create", (req, res) => {
+const claimUrl = (process.env.WIX_CLAIM_URL || "") + ids[0];
   const count = Math.max(1, Math.min(200, Number(req.body?.count || 1)));
   const now = Date.now();
   const ids = [];
