@@ -7,7 +7,7 @@ import {
   createThirdwebClient,
   Engine,
   getContract,
-  prepareContractCall
+  prepareContractCall,
 } from "thirdweb";
 import { base } from "thirdweb/chains";
 
@@ -16,21 +16,29 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "200kb" }));
 
 // ---------- ENV ----------
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 10000);
 
 const THIRDWEB_SECRET_KEY = process.env.THIRDWEB_SECRET_KEY || "";
 const THIRDWEB_VAULT_ACCESS_TOKEN = process.env.THIRDWEB_VAULT_ACCESS_TOKEN || "";
 const SERVER_WALLET_ADDRESS = process.env.SERVER_WALLET_ADDRESS || "";
 const NFT_CONTRACT_ADDRESS = process.env.NFT_CONTRACT_ADDRESS || "";
-const WIX_CLAIM_URL = process.env.WIX_CLAIM_URL || ""; // should end with ?code=
+
+// MUST end with ?id=   (example: https://www.suavecards9.com/claim?id= )
+const WIX_CLAIM_URL = process.env.WIX_CLAIM_URL || "";
 
 function envOk() {
   return !!(
     THIRDWEB_SECRET_KEY &&
     THIRDWEB_VAULT_ACCESS_TOKEN &&
     SERVER_WALLET_ADDRESS &&
-    NFT_CONTRACT_ADDRESS
+    NFT_CONTRACT_ADDRESS &&
+    WIX_CLAIM_URL
   );
+}
+
+function buildClaimUrl(code) {
+  // If you set WIX_CLAIM_URL to ".../claim?id=" then we just append the code
+  return `${WIX_CLAIM_URL}${encodeURIComponent(code)}`;
 }
 
 // ---------- DB (QR one-time use) ----------
@@ -54,7 +62,11 @@ const markUsed = db.prepare(
 );
 
 function newId() {
-  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  // only alphanumeric so Wix won't complain
+  return (
+    Math.random().toString(36).slice(2, 10) +
+    Math.random().toString(36).slice(2, 10)
+  );
 }
 
 // ---------- THIRDWEB ENGINE ----------
@@ -63,13 +75,13 @@ const client = createThirdwebClient({ secretKey: THIRDWEB_SECRET_KEY });
 const serverWallet = Engine.serverWallet({
   client,
   address: SERVER_WALLET_ADDRESS,
-  vaultAccessToken: THIRDWEB_VAULT_ACCESS_TOKEN
+  vaultAccessToken: THIRDWEB_VAULT_ACCESS_TOKEN,
 });
 
 const contract = getContract({
   client,
   chain: base,
-  address: NFT_CONTRACT_ADDRESS
+  address: NFT_CONTRACT_ADDRESS,
 });
 
 // NFT Drop mint: claimTo(address,uint256)
@@ -77,7 +89,7 @@ function buildMintTx(toAddress) {
   return prepareContractCall({
     contract,
     method: "function claimTo(address _receiver, uint256 _quantity)",
-    params: [toAddress, 1n]
+    params: [toAddress, 1n],
   });
 }
 
@@ -91,12 +103,19 @@ app.get("/env-check", (req, res) => {
     hasSecretKey: !!THIRDWEB_SECRET_KEY,
     hasVaultToken: !!THIRDWEB_VAULT_ACCESS_TOKEN,
     hasServerWallet: !!SERVER_WALLET_ADDRESS,
-    hasContract: !!NFT_CONTRACT_ADDRESS
+    hasContract: !!NFT_CONTRACT_ADDRESS,
+    hasWixClaimUrl: !!WIX_CLAIM_URL,
+    wixClaimUrlPreview: WIX_CLAIM_URL ? WIX_CLAIM_URL.slice(0, 60) + "..." : "",
   });
 });
 
-// ADMIN: create QRs
-const claimUrl = (process.env.WIX_CLAIM_URL || "") + ids[0];
+// Quick sanity: shows what claim URL will look like
+app.get("/test-claimurl", (req, res) => {
+  res.json({ ok: true, claimUrl: buildClaimUrl("ABC123") });
+});
+
+// ADMIN: create QRs (Wix automation calls this)
+app.post("/api/qrs/create", (req, res) => {
   const count = Math.max(1, Math.min(200, Number(req.body?.count || 1)));
   const now = Date.now();
   const ids = [];
@@ -107,16 +126,17 @@ const claimUrl = (process.env.WIX_CLAIM_URL || "") + ids[0];
     ids.push(id);
   }
 
-  // Return BOTH (Wix uses claimUrl)
+  const claimUrl = buildClaimUrl(ids[0]);
+
   res.json({
     ok: true,
-    claimUrl,
+    claimUrl,          // <-- Wix email should use this
     code: ids[0],
     created: ids.length,
-    ids
-   });
+    ids,
   });
-  
+});
+
 // ADMIN: list QRs
 app.get("/api/qrs", (req, res) => {
   const limit = Math.max(1, Math.min(500, Number(req.query?.limit || 50)));
@@ -125,21 +145,20 @@ app.get("/api/qrs", (req, res) => {
     created_at: r.created_at,
     used_at: r.used_at,
     used_by: r.used_by,
-    transaction_id: r.transaction_id
+    transaction_id: r.transaction_id,
   }));
   res.json({ ok: true, items });
 });
 
-// QR PNG for printing (points to Wix Claim page)
+// QR PNG for printing (optional)
 app.get("/qr/:id.png", async (req, res) => {
   const id = String(req.params.id || "");
   const row = getQR.get(id);
   if (!row) return res.status(404).send("Not found");
 
-  const urlBase = WIX_CLAIM_URL || `${req.protocol}://${req.get("host")}/claim`;
-const url = `${urlBase}?id=${encodeURIComponent(id)}`;
-
+  const url = buildClaimUrl(id);
   const png = await QRCode.toBuffer(url, { width: 700, margin: 1 });
+
   res.setHeader("Content-Type", "image/png");
   res.setHeader("Cache-Control", "no-store");
   res.send(png);
@@ -149,7 +168,7 @@ const url = `${urlBase}?id=${encodeURIComponent(id)}`;
 // POST /api/claim { code, walletAddress }
 app.post("/api/claim", async (req, res) => {
   const code = String(req.body?.code || "");
-  const walletAddress = String(req.body?.walletAddress || "");
+  const walletAddress = String(req.body?.walletAddress || "").trim();
 
   if (!envOk()) return res.status(500).json({ ok: false, error: "Missing env vars" });
   if (!code) return res.status(400).json({ ok: false, error: "Missing code" });
@@ -174,4 +193,14 @@ app.post("/api/claim", async (req, res) => {
   }
 });
 
+const server = app.listen(PORT, () => console.log(`Running on port ${PORT}`));
 
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.log("Port already in use, exiting so Render restarts cleanly...");
+    setTimeout(() => process.exit(1), 500);
+  } else {
+    console.error(err);
+    process.exit(1);
+  }
+});
