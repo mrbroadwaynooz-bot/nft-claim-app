@@ -107,9 +107,6 @@ const claimUrl = (process.env.WIX_CLAIM_URL || "") + ids[0];
     ids.push(id);
   }
 
-  // Build a claim URL for the FIRST code
-  const claimUrl = (process.env.WIX_CLAIM_URL || "") + "?id=" + ids[0];
-
   // Return BOTH (Wix uses claimUrl)
   res.json({
     ok: true,
@@ -177,25 +174,4 @@ app.post("/api/claim", async (req, res) => {
   }
 });
 
-app.get("/test-claimurl", (req, res) => {
-  const id = "test123";
-  const claimUrl = (process.env.WIX_CLAIM_URL || "") + id; // expects ...?code=
-  res.json({ claimUrl });
-});
 
-const server = app.listen(PORT, () => console.log(`Running on port ${PORT}`));
-
-server.on("error", (err) => {
-  if (err.code === "EADDRINUSE") {
-    console.log("Port already in use, waiting and retrying...");
-    setTimeout(() => process.exit(1), 1000); // Render will restart cleanly
-  } else {
-    console.error(err);
-    process.exit(1);
-  }
-});
-app.get("/test", (req, res) => {
-  res.json({
-    claimUrl: "https://google.com"
-  });
-});
