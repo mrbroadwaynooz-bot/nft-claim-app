@@ -166,54 +166,63 @@ app.get("/qr/:id.png", async (req, res) => {
 
 // CLAIM endpoint
 // POST /api/claim { code, walletAddress }
-const API_URL = "https://nft-claim-app.onrender.com/api/claim";
+// POST /api/claim { code, email?, phone? }
+app.post("/api/claim", async (req, res) => {
+  const code = String(req.body?.code || "");
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const phone = String(req.body?.phone || "").trim();
 
-$w.onReady(function () {
-  const code = wixLocation.query.code || wixLocation.query.id || "";
+  if (!envOk())
+    return res.status(500).json({ ok: false, error: "Missing env vars" });
 
-  if (!code) {
-    $w("#statusText").text = "Invalid claim link.";
-    $w("#claimBtn").disable();
-    return;
+  if (!code)
+    return res.status(400).json({ ok: false, error: "Missing code" });
+
+  if (!email && !phone)
+    return res.status(400).json({ ok: false, error: "Provide email or phone" });
+
+  const identifier = email || phone;
+
+  const row = getQR.get(code);
+  if (!row)
+    return res.status(404).json({ ok: false, error: "QR not found" });
+
+  if (row.used_at)
+    return res.status(409).json({ ok: false, error: "Already claimed" });
+
+  try {
+    // Create wallet tied to email or phone
+    const userWallet = await serverWallet.createWallet({
+      identifier
+    });
+
+    const walletAddress = userWallet.address;
+
+    const transaction = buildMintTx(walletAddress);
+
+    const { transactionId } =
+      await serverWallet.enqueueTransaction({ transaction });
+
+    const changed = markUsed.run(
+      Date.now(),
+      walletAddress,
+      transactionId,
+      code
+    ).changes;
+
+    if (!changed)
+      return res.status(409).json({ ok: false, error: "QR just got used" });
+
+    res.json({
+      ok: true,
+      transactionId,
+      walletAddress
+    });
+
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      error: e?.message || String(e)
+    });
   }
-
-  $w("#statusText").text = "Enter email or phone to claim your NFT.";
-  $w("#claimBtn").enable();
-
-  $w("#claimBtn").onClick(async () => {
-    const email = String($w("#emailInput").value || "").trim();
-    const phone = String($w("#phoneInput").value || "").trim();
-
-    if (!email && !phone) {
-      $w("#statusText").text = "Enter email or phone.";
-      return;
-    }
-
-    try {
-      $w("#claimBtn").disable();
-      $w("#statusText").text = "Minting your NFT...";
-
-      const res = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, email, phone })
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.ok) {
-        $w("#statusText").text =
-          "Claim failed: " + (data.error || "unknown error");
-        $w("#claimBtn").enable();
-        return;
-      }
-
-      $w("#statusText").text =
-        "Success ✅ NFT minted. Tx: " + data.transactionId;
-
-    } catch (e) {
-      $w("#statusText").text = "Network error. Try again.";
-      $w("#claimBtn").enable();
-    }
-  });
 });
