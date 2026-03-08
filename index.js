@@ -3,6 +3,10 @@ import helmet from "helmet";
 import Database from "better-sqlite3";
 import QRCode from "qrcode";
 
+app.get("/", (req, res) => {
+  res.json({ ok: true, server: "running" });
+});
+
 import {
   createThirdwebClient,
   Engine,
