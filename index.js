@@ -166,8 +166,6 @@ app.get("/qr/:id.png", async (req, res) => {
 
 // CLAIM endpoint
 // POST /api/claim { code, walletAddress }
-import wixLocation from "wix-location";
-
 const API_URL = "https://nft-claim-app.onrender.com/api/claim";
 
 $w.onReady(function () {
