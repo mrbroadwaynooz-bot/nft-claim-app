@@ -241,7 +241,4 @@ app.post("/api/claim", async (req, res) => {
 });
 
 // ---------- START ----------
-app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});running on port", PORT);
-});
+app.listen(PORT, () => console.log("Server running on port", PORT));
