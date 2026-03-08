@@ -2,7 +2,6 @@ import express from "express";
 import helmet from "helmet";
 import Database from "better-sqlite3";
 import QRCode from "qrcode";
-import { Wallet } from "ethers";
 
 import {
   createThirdwebClient,
@@ -10,20 +9,19 @@ import {
   getContract,
   prepareContractCall,
 } from "thirdweb";
+
 import { base } from "thirdweb/chains";
 
 const app = express();
 
 app.use(helmet({ contentSecurityPolicy: false }));
 
-// simple CORS without installing cors package
+// simple CORS support
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
 });
 
@@ -52,17 +50,17 @@ function buildClaimUrl(code) {
   return `${WIX_CLAIM_URL}${encodeURIComponent(code)}`;
 }
 
-// ---------- DB ----------
+// ---------- DATABASE ----------
 const db = new Database("data.sqlite");
-db.pragma("journal_mode = WAL");
+
 db.exec(`
-  CREATE TABLE IF NOT EXISTS qrs (
-    id TEXT PRIMARY KEY,
-    created_at INTEGER NOT NULL,
-    used_at INTEGER,
-    used_by TEXT,
-    transaction_id TEXT
-  );
+CREATE TABLE IF NOT EXISTS qrs (
+  id TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  used_at INTEGER,
+  used_by TEXT,
+  transaction_id TEXT
+);
 `);
 
 const insertQR = db.prepare("INSERT OR IGNORE INTO qrs (id, created_at) VALUES (?, ?)");
@@ -105,6 +103,7 @@ function buildMintTx(toAddress) {
 }
 
 // ---------- ROUTES ----------
+
 app.get("/", (req, res) => {
   res.send("Engine Claim backend running ✅");
 });
@@ -113,23 +112,12 @@ app.get("/env-check", (req, res) => {
   res.json({
     ok: true,
     envOk: envOk(),
-    hasSecretKey: !!THIRDWEB_SECRET_KEY,
-    hasVaultToken: !!THIRDWEB_VAULT_ACCESS_TOKEN,
-    hasServerWallet: !!SERVER_WALLET_ADDRESS,
-    hasContract: !!NFT_CONTRACT_ADDRESS,
-    hasWixClaimUrl: !!WIX_CLAIM_URL,
-  });
-});
-
-app.get("/test-claimurl", (req, res) => {
-  res.json({
-    ok: true,
-    claimUrl: buildClaimUrl("ABC123"),
   });
 });
 
 // ---------- CREATE QR ----------
 app.post("/api/qrs/create", (req, res) => {
+
   const count = Math.max(1, Math.min(200, Number(req.body?.count || 1)));
   const now = Date.now();
   const ids = [];
@@ -149,11 +137,14 @@ app.post("/api/qrs/create", (req, res) => {
     created: ids.length,
     ids,
   });
+
 });
 
 // ---------- LIST QRS ----------
 app.get("/api/qrs", (req, res) => {
+
   const limit = Math.max(1, Math.min(500, Number(req.query?.limit || 50)));
+
   const items = listQR.all(limit).map((r) => ({
     id: r.id,
     created_at: r.created_at,
@@ -163,58 +154,64 @@ app.get("/api/qrs", (req, res) => {
   }));
 
   res.json({ ok: true, items });
+
 });
 
 // ---------- QR IMAGE ----------
 app.get("/qr/:id.png", async (req, res) => {
+
   const id = String(req.params.id || "");
   const row = getQR.get(id);
 
   if (!row) return res.status(404).send("Not found");
 
   const url = buildClaimUrl(id);
-  const png = await QRCode.toBuffer(url, { width: 700, margin: 1 });
+
+  const png = await QRCode.toBuffer(url, {
+    width: 700,
+    margin: 1,
+  });
 
   res.setHeader("Content-Type", "image/png");
   res.send(png);
+
 });
 
 // ---------- CLAIM ----------
 app.post("/api/claim", async (req, res) => {
+
   const code = String(req.body?.code || "");
   const email = String(req.body?.email || "").trim().toLowerCase();
   const phone = String(req.body?.phone || "").trim();
 
-  if (!envOk()) {
+  if (!envOk())
     return res.status(500).json({ ok: false, error: "Missing env vars" });
-  }
 
-  if (!code) {
+  if (!code)
     return res.status(400).json({ ok: false, error: "Missing code" });
-  }
 
-  if (!email && !phone) {
+  if (!email && !phone)
     return res.status(400).json({ ok: false, error: "Provide email or phone" });
-  }
 
   const identifier = email || phone;
+
   const row = getQR.get(code);
 
-  if (!row) {
+  if (!row)
     return res.status(404).json({ ok: false, error: "QR not found" });
-  }
 
-  if (row.used_at) {
+  if (row.used_at)
     return res.status(409).json({ ok: false, error: "Already claimed" });
-  }
 
   try {
-    // create temporary wallet address for this claim
-    const wallet = Wallet.createRandom();
-    const walletAddress = wallet.address;
+
+    // generate simple wallet address placeholder
+    const walletAddress = "0x" + Math.random().toString(16).slice(2, 42);
 
     const transaction = buildMintTx(walletAddress);
-    const { transactionId } = await serverWallet.enqueueTransaction({ transaction });
+
+    const { transactionId } =
+      await serverWallet.enqueueTransaction({ transaction });
 
     const changed = markUsed.run(
       Date.now(),
@@ -223,24 +220,28 @@ app.post("/api/claim", async (req, res) => {
       code
     ).changes;
 
-    if (!changed) {
+    if (!changed)
       return res.status(409).json({ ok: false, error: "QR just got used" });
-    }
 
     res.json({
       ok: true,
       transactionId,
       walletAddress,
     });
+
   } catch (e) {
+
     res.status(500).json({
       ok: false,
       error: e?.message || String(e),
     });
+
   }
+
 });
 
 // ---------- START ----------
 app.listen(PORT, () => {
   console.log("Server running on port", PORT);
+});running on port", PORT);
 });
