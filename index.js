@@ -196,12 +196,13 @@ app.post("/api/claim", async (req, res) => {
   try {
 
     // create wallet linked to email or phone
-    const userWallet = await serverWallet.createWallet({
-      identifier
-    });
+  import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-    const walletAddress = userWallet.address;
+const privateKey = generatePrivateKey();
+const account = privateKeyToAccount(privateKey);
 
+const walletAddress = account.address;
+    
     const transaction = buildMintTx(walletAddress);
 
     const { transactionId } =
