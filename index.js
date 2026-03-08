@@ -167,7 +167,9 @@ app.get("/qr/:id.png", async (req, res) => {
 // CLAIM endpoint
 // POST /api/claim { code, walletAddress }
 // POST /api/claim { code, email?, phone? }
+// POST /api/claim { code, email, phone }
 app.post("/api/claim", async (req, res) => {
+
   const code = String(req.body?.code || "");
   const email = String(req.body?.email || "").trim().toLowerCase();
   const phone = String(req.body?.phone || "").trim();
@@ -184,6 +186,7 @@ app.post("/api/claim", async (req, res) => {
   const identifier = email || phone;
 
   const row = getQR.get(code);
+
   if (!row)
     return res.status(404).json({ ok: false, error: "QR not found" });
 
@@ -191,7 +194,8 @@ app.post("/api/claim", async (req, res) => {
     return res.status(409).json({ ok: false, error: "Already claimed" });
 
   try {
-    // Create wallet tied to email or phone
+
+    // create wallet linked to email or phone
     const userWallet = await serverWallet.createWallet({
       identifier
     });
@@ -220,9 +224,20 @@ app.post("/api/claim", async (req, res) => {
     });
 
   } catch (e) {
+
     res.status(500).json({
       ok: false,
       error: e?.message || String(e)
     });
+
   }
+
+});
+
+
+// START SERVER
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Server running on port", PORT);
 });
