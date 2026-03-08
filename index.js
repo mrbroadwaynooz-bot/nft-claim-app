@@ -206,8 +206,8 @@ app.post("/api/claim", async (req, res) => {
   try {
 
     // generate simple wallet address placeholder
-    const walletAddress = "0x" + Math.random().toString(16).slice(2, 42);
-
+    const walletAddress = "0x" + Math.random().toString(16).slice(2).padEnd(40,"0").slice(0,40);
+    
     const transaction = buildMintTx(walletAddress);
 
     const { transactionId } =
