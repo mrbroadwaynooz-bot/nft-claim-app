@@ -4,24 +4,24 @@ import Database from "better-sqlite3";
 import QRCode from "qrcode";
 
 import {
-  createThirdwebClient,
-  Engine,
-  getContract,
-  prepareContractCall
+ createThirdwebClient,
+ Engine,
+ getContract,
+ prepareContractCall
 } from "thirdweb";
 
 import { base } from "thirdweb/chains";
 
 const app = express();
 
-app.use(helmet({ contentSecurityPolicy:false }));
+app.use(helmet({contentSecurityPolicy:false}));
 
 app.use((req,res,next)=>{
-  res.header("Access-Control-Allow-Origin","*");
-  res.header("Access-Control-Allow-Headers","Content-Type");
-  res.header("Access-Control-Allow-Methods","GET,POST,OPTIONS");
-  if(req.method==="OPTIONS") return res.sendStatus(200);
-  next();
+ res.header("Access-Control-Allow-Origin","*");
+ res.header("Access-Control-Allow-Headers","Content-Type");
+ res.header("Access-Control-Allow-Methods","GET,POST,OPTIONS");
+ if(req.method==="OPTIONS") return res.sendStatus(200);
+ next();
 });
 
 app.use(express.json());
@@ -32,31 +32,30 @@ const THIRDWEB_SECRET_KEY = process.env.THIRDWEB_SECRET_KEY;
 const THIRDWEB_VAULT_ACCESS_TOKEN = process.env.THIRDWEB_VAULT_ACCESS_TOKEN;
 const SERVER_WALLET_ADDRESS = process.env.SERVER_WALLET_ADDRESS;
 const NFT_CONTRACT_ADDRESS = process.env.NFT_CONTRACT_ADDRESS;
-
-const CLAIM_URL = process.env.WIX_CLAIM_URL;
+const WIX_CLAIM_URL = process.env.WIX_CLAIM_URL;
 
 const client = createThirdwebClient({
-  secretKey: THIRDWEB_SECRET_KEY
+ secretKey: THIRDWEB_SECRET_KEY
 });
 
 const serverWallet = Engine.serverWallet({
-  client,
-  address: SERVER_WALLET_ADDRESS,
-  vaultAccessToken: THIRDWEB_VAULT_ACCESS_TOKEN
+ client,
+ address: SERVER_WALLET_ADDRESS,
+ vaultAccessToken: THIRDWEB_VAULT_ACCESS_TOKEN
 });
 
 const contract = getContract({
-  client,
-  chain: base,
-  address: NFT_CONTRACT_ADDRESS
+ client,
+ chain: base,
+ address: NFT_CONTRACT_ADDRESS
 });
 
 function buildMintTx(address){
-  return prepareContractCall({
-    contract,
-    method:"function claimTo(address _receiver,uint256 _quantity)",
-    params:[address,1n]
-  });
+ return prepareContractCall({
+  contract,
+  method:"function claimTo(address _receiver,uint256 _quantity)",
+  params:[address,1n]
+ });
 }
 
 /* DATABASE */
@@ -74,21 +73,28 @@ CREATE TABLE IF NOT EXISTS claims(
 `);
 
 function newId(){
- return Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,10);
+ return Math.random().toString(36).slice(2,10) +
+        Math.random().toString(36).slice(2,10);
 }
 
-/* CREATE CLAIM CODE */
+/* ROOT */
+
+app.get("/",(req,res)=>{
+ res.send("NFT Claim backend running");
+});
+
+/* CREATE QR */
 
 app.post("/api/qrs/create",(req,res)=>{
 
- const id=newId();
+ const id = newId();
 
  db.prepare(`
  INSERT INTO claims(id,created)
  VALUES(?,?)
  `).run(id,Date.now());
 
- const claimUrl=`${CLAIM_URL}${id}`;
+ const claimUrl = `${WIX_CLAIM_URL}${id}`;
 
  res.json({
   ok:true,
@@ -102,23 +108,32 @@ app.post("/api/qrs/create",(req,res)=>{
 
 app.post("/api/claim",async(req,res)=>{
 
- const code=req.body.code;
- const email=req.body.email;
+ const code = req.body.code;
+ const email = req.body.email;
 
  if(!code || !email){
-  return res.status(400).json({ok:false,error:"missing data"});
+  return res.status(400).json({
+   ok:false,
+   error:"missing data"
+  });
  }
 
- const row=db.prepare(`
+ const row = db.prepare(`
  SELECT * FROM claims WHERE id=?
  `).get(code);
 
  if(!row){
-  return res.status(404).json({ok:false,error:"invalid code"});
+  return res.status(404).json({
+   ok:false,
+   error:"invalid code"
+  });
  }
 
  if(row.tx){
-  return res.status(409).json({ok:false,error:"already claimed"});
+  return res.status(409).json({
+   ok:false,
+   error:"already claimed"
+  });
  }
 
  try{
@@ -132,7 +147,9 @@ app.post("/api/claim",async(req,res)=>{
   const tx = buildMintTx(walletAddress);
 
   const {transactionId} =
-   await serverWallet.enqueueTransaction({transaction:tx});
+   await serverWallet.enqueueTransaction({
+    transaction:tx
+   });
 
   db.prepare(`
   UPDATE claims
@@ -157,13 +174,37 @@ app.post("/api/claim",async(req,res)=>{
 
 });
 
+/* USER NFT LOGIN */
+
+app.post("/api/user-nfts",(req,res)=>{
+
+ const email = req.body.email;
+
+ if(!email){
+  return res.status(400).json({
+   ok:false
+  });
+ }
+
+ const rows = db.prepare(`
+ SELECT wallet FROM claims
+ WHERE email=?
+ `).all(email);
+
+ res.json({
+  ok:true,
+  wallets:rows
+ });
+
+});
+
 /* QR IMAGE */
 
 app.get("/qr/:id.png",async(req,res)=>{
 
- const url=`${CLAIM_URL}${req.params.id}`;
+ const url = `${WIX_CLAIM_URL}${req.params.id}`;
 
- const png=await QRCode.toBuffer(url,{width:700});
+ const png = await QRCode.toBuffer(url,{width:700});
 
  res.setHeader("Content-Type","image/png");
  res.send(png);
@@ -171,5 +212,5 @@ app.get("/qr/:id.png",async(req,res)=>{
 });
 
 app.listen(PORT,()=>{
- console.log("server running",PORT);
+ console.log("Server running on port",PORT);
 });
