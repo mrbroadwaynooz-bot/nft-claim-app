@@ -7,35 +7,38 @@ import {
   createThirdwebClient,
   Engine,
   getContract,
-  prepareContractCall,
+  prepareContractCall
 } from "thirdweb";
+
 import { base } from "thirdweb/chains";
 
 const app = express();
 
 app.use(helmet({ contentSecurityPolicy: false }));
 
-// simple CORS
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
-  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  if (req.method === "OPTIONS") return res.sendStatus(200);
+// CORS
+app.use((req,res,next)=>{
+  res.header("Access-Control-Allow-Origin","*");
+  res.header("Access-Control-Allow-Headers","Content-Type");
+  res.header("Access-Control-Allow-Methods","GET,POST,OPTIONS");
+  if(req.method==="OPTIONS") return res.sendStatus(200);
   next();
 });
 
-app.use(express.json({ limit: "200kb" }));
+app.use(express.json({limit:"200kb"}));
 
-// ---------- ENV ----------
+/* ---------------- ENV ---------------- */
+
 const PORT = Number(process.env.PORT || 10000);
 
 const THIRDWEB_SECRET_KEY = process.env.THIRDWEB_SECRET_KEY || "";
 const THIRDWEB_VAULT_ACCESS_TOKEN = process.env.THIRDWEB_VAULT_ACCESS_TOKEN || "";
 const SERVER_WALLET_ADDRESS = process.env.SERVER_WALLET_ADDRESS || "";
 const NFT_CONTRACT_ADDRESS = process.env.NFT_CONTRACT_ADDRESS || "";
-const WIX_CLAIM_URL = process.env.WIX_CLAIM_URL || ""; // should end with ?code=
 
-function envOk() {
+const WIX_CLAIM_URL = process.env.WIX_CLAIM_URL || "";
+
+function envOk(){
   return !!(
     THIRDWEB_SECRET_KEY &&
     THIRDWEB_VAULT_ACCESS_TOKEN &&
@@ -45,288 +48,220 @@ function envOk() {
   );
 }
 
-function buildClaimUrl(code) {
+function buildClaimUrl(code){
   return `${WIX_CLAIM_URL}${encodeURIComponent(code)}`;
 }
 
-function isValidWallet(address) {
+function isWallet(address){
   return /^0x[a-fA-F0-9]{40}$/.test(address);
 }
 
-// ---------- DB ----------
+/* ---------------- DATABASE ---------------- */
+
 const db = new Database("data.sqlite");
-db.pragma("journal_mode = WAL");
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS qrs (
-    id TEXT PRIMARY KEY,
-    created_at INTEGER NOT NULL,
-    used_at INTEGER,
-    used_by TEXT,
-    transaction_id TEXT
-  );
+CREATE TABLE IF NOT EXISTS qrs(
+ id TEXT PRIMARY KEY,
+ created_at INTEGER,
+ status TEXT,
+ reserved_email TEXT,
+ reserved_phone TEXT,
+ wallet TEXT,
+ tx TEXT,
+ minted_at INTEGER
+);
 `);
 
-function ensureColumn(table, column, definition) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
-  if (!cols.includes(column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
-}
+const insertQR = db.prepare(`
+INSERT OR IGNORE INTO qrs(id,created_at,status)
+VALUES(?,?,?)
+`);
 
-ensureColumn("qrs", "reserved_email", "TEXT");
-ensureColumn("qrs", "reserved_phone", "TEXT");
-ensureColumn("qrs", "claimed_wallet", "TEXT");
-ensureColumn("qrs", "minted_at", "INTEGER");
-ensureColumn("qrs", "status", "TEXT DEFAULT 'new'");
-
-const insertQR = db.prepare(
-  "INSERT OR IGNORE INTO qrs (id, created_at, status) VALUES (?, ?, 'new')"
-);
-const getQR = db.prepare("SELECT * FROM qrs WHERE id = ?");
-const listQR = db.prepare("SELECT * FROM qrs ORDER BY created_at DESC LIMIT ?");
+const getQR = db.prepare(`
+SELECT * FROM qrs WHERE id=?
+`);
 
 const reserveQR = db.prepare(`
-  UPDATE qrs
-  SET reserved_email = ?, reserved_phone = ?, status = 'reserved'
-  WHERE id = ? AND (status = 'new' OR status IS NULL)
+UPDATE qrs
+SET reserved_email=?, reserved_phone=?, status='reserved'
+WHERE id=? AND status='new'
 `);
 
 const mintQR = db.prepare(`
-  UPDATE qrs
-  SET used_at = ?, used_by = ?, transaction_id = ?, claimed_wallet = ?, minted_at = ?, status = 'minted'
-  WHERE id = ? AND status = 'reserved' AND minted_at IS NULL
+UPDATE qrs
+SET wallet=?, tx=?, minted_at=?, status='minted'
+WHERE id=? AND status='reserved'
 `);
 
-function newId() {
-  return (
-    Math.random().toString(36).slice(2, 10) +
-    Math.random().toString(36).slice(2, 10)
-  );
+function newId(){
+ return Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,10);
 }
 
-// ---------- THIRDWEB ----------
+/* ---------------- THIRDWEB ---------------- */
+
 const client = createThirdwebClient({
-  secretKey: THIRDWEB_SECRET_KEY,
+  secretKey:THIRDWEB_SECRET_KEY
 });
 
 const serverWallet = Engine.serverWallet({
   client,
-  address: SERVER_WALLET_ADDRESS,
-  vaultAccessToken: THIRDWEB_VAULT_ACCESS_TOKEN,
+  address:SERVER_WALLET_ADDRESS,
+  vaultAccessToken:THIRDWEB_VAULT_ACCESS_TOKEN
 });
 
 const contract = getContract({
   client,
-  chain: base,
-  address: NFT_CONTRACT_ADDRESS,
+  chain:base,
+  address:NFT_CONTRACT_ADDRESS
 });
 
-function buildMintTx(toAddress) {
-  return prepareContractCall({
-    contract,
-    method: "function claimTo(address _receiver, uint256 _quantity)",
-    params: [toAddress, 1n],
-  });
+function buildMintTx(wallet){
+ return prepareContractCall({
+  contract,
+  method:"function claimTo(address _receiver,uint256 _quantity)",
+  params:[wallet,1n]
+ });
 }
 
-// ---------- ROUTES ----------
-app.get("/", (req, res) => {
-  res.send("Engine Claim backend running ✅");
+/* ---------------- ROUTES ---------------- */
+
+app.get("/",(req,res)=>{
+ res.send("NFT claim backend running");
 });
 
-app.get("/env-check", (req, res) => {
-  res.json({
-    ok: true,
-    envOk: envOk(),
-    hasSecretKey: !!THIRDWEB_SECRET_KEY,
-    hasVaultToken: !!THIRDWEB_VAULT_ACCESS_TOKEN,
-    hasServerWallet: !!SERVER_WALLET_ADDRESS,
-    hasContract: !!NFT_CONTRACT_ADDRESS,
-    hasWixClaimUrl: !!WIX_CLAIM_URL,
-  });
+app.get("/env-check",(req,res)=>{
+ res.json({
+  ok:true,
+  envOk:envOk()
+ });
 });
 
-app.get("/test-claimurl", (req, res) => {
-  res.json({
-    ok: true,
-    claimUrl: buildClaimUrl("ABC123"),
-  });
+/* create qr */
+
+app.post("/api/qrs/create",(req,res)=>{
+
+ const count = Math.max(1,Math.min(200,Number(req.body?.count||1)));
+
+ const ids=[];
+ const now = Date.now();
+
+ for(let i=0;i<count;i++){
+  const id=newId();
+  insertQR.run(id,now,"new");
+  ids.push(id);
+ }
+
+ res.json({
+  ok:true,
+  claimUrl:buildClaimUrl(ids[0]),
+  code:ids[0],
+  ids
+ });
+
 });
 
-// create QR
-app.post("/api/qrs/create", (req, res) => {
-  const count = Math.max(1, Math.min(200, Number(req.body?.count || 1)));
-  const now = Date.now();
-  const ids = [];
+/* reserve */
 
-  for (let i = 0; i < count; i++) {
-    const id = newId();
-    insertQR.run(id, now);
-    ids.push(id);
-  }
+app.post("/api/reserve-claim",(req,res)=>{
 
-  res.json({
-    ok: true,
-    claimUrl: buildClaimUrl(ids[0]),
-    code: ids[0],
-    created: ids.length,
-    ids,
-  });
+ const code=String(req.body?.code||"");
+ const email=String(req.body?.email||"").trim().toLowerCase();
+ const phone=String(req.body?.phone||"").trim();
+
+ if(!code) return res.status(400).json({ok:false,error:"missing code"});
+
+ if(!email && !phone)
+  return res.status(400).json({ok:false,error:"enter email or phone"});
+
+ const row=getQR.get(code);
+
+ if(!row)
+  return res.status(404).json({ok:false,error:"QR not found"});
+
+ if(row.status==="minted")
+  return res.status(409).json({ok:false,error:"already minted"});
+
+ if(row.status==="reserved")
+  return res.json({ok:true,reserved:true});
+
+ const changed = reserveQR.run(email||null,phone||null,code).changes;
+
+ if(!changed)
+  return res.status(409).json({ok:false,error:"could not reserve"});
+
+ res.json({ok:true,reserved:true});
+
 });
 
-// list QRs
-app.get("/api/qrs", (req, res) => {
-  const limit = Math.max(1, Math.min(500, Number(req.query?.limit || 50)));
-  const items = listQR.all(limit).map((r) => ({
-    id: r.id,
-    created_at: r.created_at,
-    status: r.status,
-    reserved_email: r.reserved_email,
-    reserved_phone: r.reserved_phone,
-    claimed_wallet: r.claimed_wallet,
-    minted_at: r.minted_at,
-    transaction_id: r.transaction_id,
-  }));
-  res.json({ ok: true, items });
-});
+/* mint */
 
-// QR PNG
-app.get("/qr/:id.png", async (req, res) => {
-  const id = String(req.params.id || "");
-  const row = getQR.get(id);
-  if (!row) return res.status(404).send("Not found");
+app.post("/api/finalize-claim",async(req,res)=>{
 
-  const png = await QRCode.toBuffer(buildClaimUrl(id), {
-    width: 700,
-    margin: 1,
-  });
+ const code=String(req.body?.code||"");
+ const wallet=String(req.body?.walletAddress||"").trim();
 
-  res.setHeader("Content-Type", "image/png");
-  res.send(png);
-});
+ if(!envOk())
+  return res.status(500).json({ok:false,error:"missing env vars"});
 
-// reserve NFT
-app.post("/api/reserve-claim", (req, res) => {
-  const code = String(req.body?.code || "");
-  const email = String(req.body?.email || "").trim().toLowerCase();
-  const phone = String(req.body?.phone || "").trim();
+ if(!isWallet(wallet))
+  return res.status(400).json({ok:false,error:"invalid wallet"});
 
-  if (!code) {
-    return res.status(400).json({ ok: false, error: "Missing code" });
-  }
+ const row=getQR.get(code);
 
-  if (!email && !phone) {
-    return res.status(400).json({ ok: false, error: "Provide email or phone" });
-  }
+ if(!row)
+  return res.status(404).json({ok:false,error:"QR not found"});
 
-  const row = getQR.get(code);
+ if(row.status!=="reserved")
+  return res.status(409).json({ok:false,error:"reserve first"});
 
-  if (!row) {
-    return res.status(404).json({ ok: false, error: "QR not found" });
-  }
+ try{
 
-  if (row.status === "minted") {
-    return res.status(409).json({ ok: false, error: "Already minted" });
-  }
+  const tx=buildMintTx(wallet);
 
-  if (row.status === "reserved") {
-    const sameReservation =
-      (row.reserved_email && row.reserved_email === email) ||
-      (row.reserved_phone && row.reserved_phone === phone);
+  const {transactionId}=await serverWallet.enqueueTransaction({transaction:tx});
 
-    if (!sameReservation) {
-      return res.status(409).json({ ok: false, error: "Already reserved" });
-    }
-
-    return res.json({
-      ok: true,
-      reserved: true,
-      message: "Already reserved. Continue to wallet step.",
-    });
-  }
-
-  const changed = reserveQR.run(email || null, phone || null, code).changes;
-
-  if (!changed) {
-    return res.status(409).json({ ok: false, error: "Could not reserve" });
-  }
+  mintQR.run(wallet,transactionId,Date.now(),code);
 
   res.json({
-    ok: true,
-    reserved: true,
-    message: "NFT reserved. Continue to wallet step.",
+   ok:true,
+   transactionId,
+   wallet
   });
+
+ }catch(e){
+
+  res.status(500).json({
+   ok:false,
+   error:e?.message||String(e)
+  });
+
+ }
+
 });
 
-// finalize and mint
-app.post("/api/finalize-claim", async (req, res) => {
-  const code = String(req.body?.code || "");
-  const walletAddress = String(req.body?.walletAddress || "").trim();
+/* QR image */
 
-  if (!envOk()) {
-    return res.status(500).json({ ok: false, error: "Missing env vars" });
-  }
+app.get("/qr/:id.png",async(req,res)=>{
 
-  if (!code) {
-    return res.status(400).json({ ok: false, error: "Missing code" });
-  }
+ const id=req.params.id;
 
-  if (!isValidWallet(walletAddress)) {
-    return res.status(400).json({ ok: false, error: "Invalid wallet address" });
-  }
+ const row=getQR.get(id);
 
-  const row = getQR.get(code);
+ if(!row) return res.status(404).send("not found");
 
-  if (!row) {
-    return res.status(404).json({ ok: false, error: "QR not found" });
-  }
+ const png=await QRCode.toBuffer(buildClaimUrl(id),{
+  width:700,
+  margin:1
+ });
 
-  if (row.status !== "reserved") {
-    return res.status(409).json({ ok: false, error: "Reserve with email or phone first" });
-  }
+ res.setHeader("Content-Type","image/png");
+ res.send(png);
 
-  if (row.minted_at) {
-    return res.status(409).json({ ok: false, error: "Already minted" });
-  }
-
-  try {
-    const transaction = buildMintTx(walletAddress);
-    const { transactionId } = await serverWallet.enqueueTransaction({ transaction });
-
-    const usedBy = row.reserved_email || row.reserved_phone || "";
-    const now = Date.now();
-
-    const changed = mintQR.run(
-      now,
-      usedBy,
-      transactionId,
-      walletAddress,
-      now,
-      code
-    ).changes;
-
-    if (!changed) {
-      return res.status(409).json({ ok: false, error: "Could not finalize claim" });
-    }
-
-    res.json({
-      ok: true,
-      transactionId,
-      walletAddress,
-    });
-  } catch (e) {
-    res.status(500).json({
-      ok: false,
-      error: e?.message || String(e),
-    });
-  }
 });
 
-app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});
-});
+/* start server */
 
-// ---------- START ----------
-app.listen(PORT, () => console.log("Server running on port", PORT));
+app.listen(PORT,()=>{
+ console.log("Server running on port",PORT);
+});
