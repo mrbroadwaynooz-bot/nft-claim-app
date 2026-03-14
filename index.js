@@ -52,13 +52,13 @@ const contract = getContract({
  address: NFT_CONTRACT_ADDRESS
 });
 
-/* FIXED MINT FUNCTION */
+/* CORRECT MINT FUNCTION */
 
 function buildMintTx(wallet){
  return prepareContractCall({
   contract,
-  method: "claimTo",
-  params: [wallet, 1]
+  method: "function claimTo(address _receiver, uint256 _quantity)",
+  params: [wallet, 1n]
  });
 }
 
