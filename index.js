@@ -52,11 +52,13 @@ const contract = getContract({
  address: NFT_CONTRACT_ADDRESS
 });
 
+/* FIXED MINT FUNCTION */
+
 function buildMintTx(wallet){
  return prepareContractCall({
   contract,
-  method:"function claimTo(address _receiver,uint256 _quantity)",
-  params:[wallet,1n]
+  method: "claimTo",
+  params: [wallet, 1]
  });
 }
 
@@ -218,4 +220,3 @@ app.get("/qr/:id.png", async (req,res)=>{
 app.listen(PORT,()=>{
  console.log("Server running on port",PORT);
 });
-
