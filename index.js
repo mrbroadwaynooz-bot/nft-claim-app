@@ -14,7 +14,7 @@ import { base } from "thirdweb/chains";
 
 const app = express();
 
-app.use(helmet({contentSecurityPolicy:false}));
+app.use(helmet({ contentSecurityPolicy:false }));
 
 app.use((req,res,next)=>{
  res.header("Access-Control-Allow-Origin","*");
@@ -34,6 +34,8 @@ const SERVER_WALLET_ADDRESS = process.env.SERVER_WALLET_ADDRESS;
 const NFT_CONTRACT_ADDRESS = process.env.NFT_CONTRACT_ADDRESS;
 const WIX_CLAIM_URL = process.env.WIX_CLAIM_URL;
 
+/* THIRDWEB */
+
 const client = createThirdwebClient({
  secretKey: THIRDWEB_SECRET_KEY
 });
@@ -50,11 +52,11 @@ const contract = getContract({
  address: NFT_CONTRACT_ADDRESS
 });
 
-function buildMintTx(address){
+function buildMintTx(wallet){
  return prepareContractCall({
   contract,
   method:"function claimTo(address _receiver,uint256 _quantity)",
-  params:[address,1n]
+  params:[wallet,1n]
  });
 }
 
@@ -106,15 +108,23 @@ app.post("/api/qrs/create",(req,res)=>{
 
 /* CLAIM NFT */
 
-app.post("/api/claim",async(req,res)=>{
+app.post("/api/claim", async (req,res)=>{
 
  const code = req.body.code;
  const email = req.body.email;
+ const walletAddress = req.body.walletAddress;
 
- if(!code || !email){
+ if(!code || !email || !walletAddress){
   return res.status(400).json({
    ok:false,
    error:"missing data"
+  });
+ }
+
+ if(!walletAddress.startsWith("0x") || walletAddress.length !== 42){
+  return res.status(400).json({
+   ok:false,
+   error:"invalid wallet address"
   });
  }
 
@@ -138,17 +148,11 @@ app.post("/api/claim",async(req,res)=>{
 
  try{
 
-  const wallet = await serverWallet.createWallet({
-   identifier: email
-  });
+  const transaction = buildMintTx(walletAddress);
 
-  const walletAddress = wallet.address;
-
-  const tx = buildMintTx(walletAddress);
-
-  const {transactionId} =
+  const { transactionId } =
    await serverWallet.enqueueTransaction({
-    transaction:tx
+    transaction
    });
 
   db.prepare(`
@@ -200,7 +204,7 @@ app.post("/api/user-nfts",(req,res)=>{
 
 /* QR IMAGE */
 
-app.get("/qr/:id.png",async(req,res)=>{
+app.get("/qr/:id.png", async (req,res)=>{
 
  const url = `${WIX_CLAIM_URL}${req.params.id}`;
 
@@ -214,3 +218,4 @@ app.get("/qr/:id.png",async(req,res)=>{
 app.listen(PORT,()=>{
  console.log("Server running on port",PORT);
 });
+
