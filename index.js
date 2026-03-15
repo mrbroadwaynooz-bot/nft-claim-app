@@ -57,7 +57,7 @@ const contract = getContract({
 function buildMintTx(wallet){
  return prepareContractCall({
   contract,
-  method: "function claim(address _receiver, uint256 _quantity)",
+  method: "function claimTo(address receiver, uint256 quantity)",
   params: [wallet, 1n]
  });
 }
